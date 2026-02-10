@@ -40,16 +40,22 @@ on:
           - "On"
           - "Off"
         default: "Off"
-      adios_rekernel_enable:
-        description: ⚙️ 是否启用ADIOS IO调度器及Re-Kernel支持
+      adios:
+        description: '⚡ 是否启用ADIOS IO调度器支持(提升IO读写性能)'
         required: true
         type: choice
-        default: 安装ADIOS调度器
         options:
-          - 均不安装
-          - 安装ADIOS调度器
-          - 安装Re-Kernel
-          - 均安装
+          - "On"
+          - "Off"
+        default: "On"
+      rekernel:
+        description: '⚙️ 是否启用Re-Kernel支持(与Freezer/NoActive等软件配合, 提升应用冻结能力)'
+        required: true
+        type: choice
+        options:
+          - "On"
+          - "Off"
+        default: "Off"
       proxy:
         description: 🌐 是否添加代理性能优化
         required: true
@@ -80,7 +86,7 @@ on:
         
 jobs:
   build:
-    name: SUSFS ${{ github.event.inputs.SUSFS }} | BBG ${{ github.event.inputs.bbg }} | ADIOS/Re-Kernel ${{ github.event.inputs.adios_rekernel_enable }}
+    name: SUSFS ${{ github.event.inputs.SUSFS }} | BBG ${{ github.event.inputs.bbg }} | ADIOS ${{ github.event.inputs.adios }} | Re-Kernel ${{ github.event.inputs.rekernel }}
     runs-on: ubuntu-latest
     env:
       CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
@@ -421,13 +427,13 @@ jobs:
             echo "CONFIG_IP6_NF_TARGET_MASQUERADE=y" >> ./common/arch/arm64/configs/gki_defconfig
           fi
 
-          if [[ "${{ github.event.inputs.adios_rekernel_enable }}" == "安装ADIOS调度器" || "${{ github.event.inputs.adios_rekernel_enable }}" == "均安装" ]]; then
+          if [ "${{ github.event.inputs.adios }}" == "On" ]; then
             echo "📦 正在设置 ADIOS..."
             echo "CONFIG_MQ_IOSCHED_ADIOS=y" >> ./common/arch/arm64/configs/gki_defconfig
             echo "CONFIG_MQ_IOSCHED_DEFAULT_ADIOS=y" >> ./common/arch/arm64/configs/gki_defconfig
           fi
 
-          if [[ "${{ github.event.inputs.adios_rekernel_enable }}" == "安装Re-Kernel" || "${{ github.event.inputs.adios_rekernel_enable }}" == "均安装" ]]; then
+          if [ "${{ github.event.inputs.rekernel }}" == "On" ]; then
             echo "📦 正在设置 Re-Kernel..."
             echo "CONFIG_REKERNEL=y" >> ./common/arch/arm64/configs/gki_defconfig
           fi
