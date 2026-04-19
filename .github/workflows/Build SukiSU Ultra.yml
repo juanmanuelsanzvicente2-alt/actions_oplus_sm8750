@@ -886,14 +886,14 @@ jobs:
           echo "--- Pre-Build File Timestamps: ---"
           LD_PRELOAD=$PRELOAD_LIBS stat ./Makefile
 
-          # 🚑 SURGICAL FIX 2.0: Apply upstream PR #873 manually
+          # 🚑 SURGICAL FIX 2.1: Bulletproof upstream PR #873 manually
           echo "🚑 Patching SukiSU-Ultra ksud.c and kernel_compat.h..."
           KSUD="drivers/kernelsu/runtime/ksud.c"
           COMPAT="drivers/kernelsu/infra/kernel_compat.h"
           
-          # Fix 1: Wrap the static key check in defined() to prevent expression errors
+          # Fix 1: Nuke the broken line and rewrite it perfectly from scratch
           if [ -f "$KSUD" ]; then
-            sed -i 's/&& KSU_COMPAT_USE_STATIC_KEY/&& defined(KSU_COMPAT_USE_STATIC_KEY)/g' "$KSUD"
+            sed -i 's/.*CONFIG_KSU_SUSFS.*KSU_COMPAT_USE_STATIC_KEY.*/#if defined(CONFIG_KSU_SUSFS) \&\& defined(KSU_COMPAT_USE_STATIC_KEY)/g' "$KSUD"
           fi
           
           # Fix 2: Append the missing #endif to close the unterminated conditional
