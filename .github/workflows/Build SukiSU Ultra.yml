@@ -19,13 +19,13 @@ on:
         description: 'Choose kernel version to build'
         required: true
         type: choice
-        default: '6.6.89'
+        default: '6.6.127'
         options:
-          - '6.6.89'
           - '6.6.127'
           - '6.6.118'
           - '6.6.111'
           - '6.6.100'
+          - '6.6.89'
       SUSFS:
         description: 'Enable SuSFS (Enhances hide environment)'
         required: true
