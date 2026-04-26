@@ -155,6 +155,11 @@ on:
         required: true
         type: boolean
         default: true
+      github_release:
+        description: 'Create GitHub Release'
+        required: true
+        type: boolean
+        default: false
         
 jobs:
   build:
@@ -1005,19 +1010,13 @@ jobs:
           name: zram-module
           path: ./zram/*
 
-      - name: 🚶‍♂️ Send Telegram Notification | 发送电报通知
-        if: inputs.telegram_notify && always()
+      - name: Send Telegram Notification (Success)
+        if: success()
         env:
           TELEGRAPH_TOKEN: ${{ secrets.TELEGRAPH_TOKEN }}
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          BUILD_STATUS="${{ job.status }}"
-          BUILD_NUM="${{ github.run_number }}"
-          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          REPO="${{ github.repository }}"
-          TIME_NOW="$(TZ='Asia/Shanghai' date +'%Y-%m-%d %H:%M:%S') CST"
-
           KSU_TYPE="SukiSU Ultra"
           KSU_DISPLAY="SukiSU Ultra"
           KSUVER="${{ env.KSUVER }}"
@@ -1042,12 +1041,10 @@ jobs:
           WG="${{ github.event.inputs.wireguard }}"
           LRNG="${{ github.event.inputs.lrng_enable }}"
           WLB="${{ github.event.inputs.wakelock_blocker }}"
-
-          if [ "$BUILD_STATUS" = "success" ]; then
-            STATUS_EMOJI="✅"; STATUS_TEXT="SUCCESS"
-          else
-            STATUS_EMOJI="❌"; STATUS_TEXT="FAILED"
-          fi
+          DATE=$(date +"%Y-%m-%d %H:%M:%S %Z")
+          COMMIT_MSG=$(git log -1 --pretty=%B | head -n 1)
+          COMMIT_HASH=$(git rev-parse --short HEAD)
+          REPO_URL="https://github.com/${{ github.repository }}"
 
           # ── Telegra.ph ────────────────────────────────────────────────────
           # Все переменные передаём через env чтобы Python их видел
@@ -1185,103 +1182,58 @@ jobs:
           PYEOF
           )
           fi
+          
+          CAPTION="✅ <b>SukiSU Ultra Build Successful!</b>
 
-          # ── Telegram message ──────────────────────────────────────────────
-          [ -n "$TELEGRAPH_URL" ] \
-            && NOTES_LINE="📖 <a href=\"${TELEGRAPH_URL}\">Build Notes</a>" \
-            || NOTES_LINE="📖 <a href=\"${RUN_URL}\">Actions Run</a>"
+          ⚡ <b>Device:</b> <code>OnePlus 13</code>
+          📅 <b>Date:</b> $DATE
+          📝 <b>Commit:</b> <code>$COMMIT_MSG</code>
+          🔢 <b>Hash:</b> <a href=\"$REPO_URL/commit/${{ github.sha }}\">$COMMIT_HASH</a>
+          📖 <b>Kernel features:</b> <a href=\"$TELEGRAPH_URL\">Read on Telegra.ph</a>"
 
-          _f() { [ "$1" = "true" ] && echo "✅" || echo "❌"; }
-          _fb() { [ "$1" != "false" ] && echo "✅" || echo "❌"; }
+          ZIP_PATH=$(ls ${{ github.workspace }}/kernel_workspace/AnyKernel*.zip | head -n 1)
+          
+          # Send the exact .zip file generated earlier
+          curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendDocument" \
+            -F chat_id="$TELEGRAM_CHAT_ID" \
+            -F document="@$ZIP_PATH" \
+            -F caption="$CAPTION" \
+            -F parse_mode="HTML"
 
-          MESSAGE="${STATUS_EMOJI} <b>Kernel Build ${STATUS_TEXT}</b> #${BUILD_NUM}
+      - name: Send Telegram Notification (Failure)
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ vars.CHAT_ID }}
+        run: |
+          DATE=$(date +"%Y-%m-%d %H:%M:%S %Z")
+          COMMIT_MSG=$(git log -1 --pretty=%B | head -n 1)
+          COMMIT_HASH=$(git rev-parse --short HEAD)
+          REPO_URL="https://github.com/${{ github.repository }}"
+          
+          CAPTION="❌ <b>SukiSU Ultra Build Failed!</b>
 
-          📱 <b>OnePlus 13 PJZ110</b> · SM8750
-          🔧 <b>${KSU_DISPLAY}</b> <code>v${KSUVER}</code>
-          🏷 <code>${{ github.event.inputs.kernel_version }}-${SUFFIX}</code> · LTO: <code>${LTO}</code> · <code>${CLANG}</code>
-
-          <b>Root &amp; Security:</b>
-          $(_f $SUSFS) SuSFS  $(_fb $KPM) KPM(${KPM})  $(_f $BBG) BBG  $(_f $MM) MultiMgr
-
-          <b>Network &amp; IO:</b>
-          $(_fb $BBR) BBR/Brutal(${BBR})  $(_f $ADIOS) ADIOS
-
-          <b>Memory &amp; FS:</b>
-          $(_f $LZ4) LZ4·1.10  $(_f $LZ4KD) LZ4KD  $(_f $ZWB) ZRAM_WB
-
-          <b>Performance:</b>
-          $(_f $SCHED) SchedUtil  $(_f $HMBIRD) HMBIRD  $(_f $UFIX) UniFix
-
-          <b>Extra:</b>
-          $(_f $CPU_OPT) CPU·Oryon  $(_f $F2FS) F2FS  $(_f $WG) WireGuard  $(_f $LRNG) LRNG  $(_f $WLB) WakeLockBlk
-
-          🕐 <code>${TIME_NOW}</code>
-          ${NOTES_LINE}  🔗 <a href=\"${RUN_URL}\">Run</a>"
-
-          python3 - "$TELEGRAM_TOKEN" "$TELEGRAM_CHAT_ID" "$MESSAGE" << 'PYEOF'
-          import sys, json, urllib.request, urllib.parse
-          token, chat_id, message = sys.argv[1], sys.argv[2], sys.argv[3]
-          data = json.dumps({
-              "chat_id": chat_id,
-              "text": message,
-              "parse_mode": "HTML",
-              "disable_web_page_preview": False,
-              "link_preview_options": {"is_disabled": False}
-          }).encode()
-          req = urllib.request.Request(
-              f"https://api.telegram.org/bot{token}/sendMessage",
-              data=data,
-              headers={"Content-Type": "application/json"},
-              method="POST"
-          )
-          try:
-              with urllib.request.urlopen(req, timeout=15) as r:
-                  result = json.load(r)
-                  print("Telegram:", "OK" if result.get("ok") else f"ERROR: {result.get('description')}")
-          except Exception as e:
-              print(f"Telegram exception: {e}")
-          PYEOF
-
-          # ── Upload ZIP ────────────────────────────────────────────────────
-          if [ "$BUILD_STATUS" = "success" ]; then
-            ZIP_FILE=$(find "${{ github.workspace }}/kernel_workspace" -name "AnyKernel3*.zip" | head -1)
-            if [ -n "$ZIP_FILE" ] && [ -f "$ZIP_FILE" ]; then
-              ZIP_SIZE=$(du -sh "$ZIP_FILE" | cut -f1)
-              ZIP_NAME=$(basename "$ZIP_FILE")
-              echo "Uploading: $ZIP_NAME ($ZIP_SIZE)"
-              CAPTION=$(printf "📦 %s\n📏 %s\n🔢 Build #%s\n⚙️ %s · LTO:%s" \
-                "$ZIP_NAME" "$ZIP_SIZE" "$BUILD_NUM" "$KSU_DISPLAY v$KSUVER" "$LTO")
-              curl -sf -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendDocument" \
-                -F "chat_id=${TELEGRAM_CHAT_ID}" \
-                -F "document=@${ZIP_FILE}" \
-                -F "caption=${CAPTION}" \
-                | python3 -c "
-          import json,sys
-          r=json.load(sys.stdin)
-          print('ZIP upload: OK' if r.get('ok') else f'ZIP upload ERROR: {r.get(\"description\")}')
-          " || echo "ZIP upload failed (size limit?)"
-            fi
-          fi
-
-          # ── Upload ZRAM Module ────────────────────────────────────────────
-          if [ "$BUILD_STATUS" = "success" ]; then
-            ZRAM_ZIP="${{ github.workspace }}/zram_module.zip"
-            if [ -f "$ZRAM_ZIP" ]; then
-              Z_SIZE=$(du -sh "$ZRAM_ZIP" | cut -f1)
-              Z_NAME="zram_module.zip"
-              echo "Uploading: $Z_NAME ($Z_SIZE)"
-              Z_CAPTION=$(printf "📦 %s\n📏 %s\n🧩 ZRAM Module for Build #%s" "$Z_NAME" "$Z_SIZE" "$BUILD_NUM")
+          ⚡ <b>Device:</b> <code>OnePlus 13</code>
+          📅 <b>Date:</b> $DATE
+          📝 <b>Commit:</b> <code>$COMMIT_MSG</code>
+          🔢 <b>Hash:</b> <a href=\"$REPO_URL/commit/${{ github.sha }}\">$COMMIT_HASH</a>"
+          
+          # Check if build.log exists before sending
+          if [ -f /tmp/kbuild.log ]; then
+            curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_TOKEN/sendDocument" \
+              -F chat_id="$TELEGRAM_CHAT_ID" \
+              -F document="@/tmp/kbuild.log" \
+              -F caption="$CAPTION
               
-              curl -sf -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendDocument" \
-                -F "chat_id=${TELEGRAM_CHAT_ID}" \
-                -F "document=@${ZRAM_ZIP}" \
-                -F "caption=${Z_CAPTION}" \
-                | python3 -c "
-          import json,sys
-          r=json.load(sys.stdin)
-          print('ZRAM upload: OK' if r.get('ok') else f'ZRAM upload ERROR: {r.get(\"description\")}')
-          " || echo "ZRAM upload failed"
-            fi
+          The error log is attached to this message." \
+              -F parse_mode="HTML"
+          else
+            curl -s -X POST "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
+              -d chat_id="$TELEGRAM_CHAT_ID" \
+              -d text="$CAPTION
+              
+          <i>The error log was not created (the error likely occurred before compilation).</i>" \
+              -d parse_mode="HTML"
           fi
 
   release:
@@ -1314,6 +1266,7 @@ jobs:
           echo "KSU_TYPENAME=$KSU_TYPENAME" >> $GITHUB_ENV
           
       - name: Create Release
+        if: ${{ github.event.inputs.github_release == 'true' }}
         id: create_release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
