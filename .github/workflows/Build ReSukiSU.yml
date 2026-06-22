@@ -350,8 +350,6 @@ jobs:
       - name: 🔧 Setup Patches
         run: |
           cd kernel_workspace
-      
-          echo "⬇️ Cloning patch repos..."
           if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
             git clone --depth=1 -b oki-android15-6.6 https://github.com/cctv18/susfs4oki.git &
           fi
@@ -359,25 +357,39 @@ jobs:
           git clone --depth=1 https://github.com/ShirkNeko/SukiSU_patch.git &
           git clone --depth=1 https://github.com/TheWildJames/kernel_patches.git wildkernels_patches &
           wait
-      
+
           if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
-            echo "📝 Staging SUSFS kernel-side files (ReSukiSU has KSU-side integration in-source)..."
             cp susfs4oki/kernel_patches/50_add_susfs_in_gki-android15-6.6.patch ./common/
             cp susfs4oki/kernel_patches/fs/* ./common/fs/
             cp susfs4oki/kernel_patches/include/linux/* ./common/include/linux/
-            # NO 10_enable_susfs_for_ksu.patch — ReSukiSU already contains it gated behind CONFIG_KSU_SUSFS.
-          fi
-      
-          cd ./common
-          cp ../kernel_patches/common/EnablePOLLY.patch ./
-          echo "📦 Enabling POLLY support..."
-          git apply -p1 < EnablePOLLY.patch || true
-      
-          if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
-            echo "📦 Applying SUSFS kernel patch..."
-            patch -p1 < 50_add_susfs_in_gki-android15-6.6.patch
+            # NO 10_ — ReSukiSU already defines susfs_ksu_sid/priv_app_sid + cached_* SID setup
+            # + susfs_is_current_*_domain funcs in-source. Applying 10_ adds a DUPLICATE
+            # susfs_ksu_sid (build-breaking). Verified.
           fi
 
+          cd ./common
+          cp ../kernel_patches/common/EnablePOLLY.patch ./
+          git apply -p1 < EnablePOLLY.patch || true
+
+          if [ "${{ github.event.inputs.SUSFS }}" == "true" ]; then
+            # Confirm ReSukiSU's in-source SUSFS SID integration is present (boot-critical).
+            SEL=KernelSU/kernel/selinux/selinux.c
+            grep -q "susfs_is_current_zygote_domain" "$SEL" \
+              && grep -q "susfs_is_current_init_domain" "$SEL" \
+              && grep -q "cache_sid" "$SEL" \
+              || { echo "❌ ReSukiSU SUSFS SID integration missing — this commit may need 10_; aborting"; exit 1; }
+
+            echo "📦 Applying 50_..."
+            patch -p1 < 50_add_susfs_in_gki-android15-6.6.patch || true
+            if grep -q "SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file))" fs/proc/task_mmu.c; then
+              rm -f fs/proc/task_mmu.c.rej
+            else
+              echo "❌ SUS_MAP guard missing"; cat fs/proc/task_mmu.c.rej 2>/dev/null; exit 1
+            fi
+            if find . -name '*.rej' | grep -q .; then
+              echo "❌ Unexpected rejects:"; find . -name '*.rej' -exec sh -c 'echo "=== $1 ==="; cat "$1"' _ {} \; ; exit 1
+            fi
+          fi
           echo "✅ Base patches applied"
 
       - name: ⚙️ Configure Kernel Options
